@@ -489,10 +489,22 @@
   }
 
   // ---- category badge color (hash-assigned, stable per category name) ----
+  // Manual overrides checked first (e.g. vegetables always shown in green,
+  // regardless of what the hash would have picked); everything else falls
+  // back to the automatic hash-based assignment below.
+  var CATEGORY_COLOR_OVERRIDES = [
+    { test: /ירק/, cls: "c5" } // ירקות / ירקות קפואים / etc. -> green
+  ];
   var categoryColorCache = {};
   function categoryBadgeClass(category){
     var key = (category || "אחר").toString();
     if (categoryColorCache[key]) return categoryColorCache[key];
+    for (var o = 0; o < CATEGORY_COLOR_OVERRIDES.length; o++){
+      if (CATEGORY_COLOR_OVERRIDES[o].test.test(key)){
+        categoryColorCache[key] = CATEGORY_COLOR_OVERRIDES[o].cls;
+        return categoryColorCache[key];
+      }
+    }
     var hash = 0;
     for (var i = 0; i < key.length; i++){ hash = (hash * 31 + key.charCodeAt(i)) >>> 0; }
     var cls = "c" + (hash % 8);
