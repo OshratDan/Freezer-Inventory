@@ -102,7 +102,9 @@
   .card-title{font-size:16px; font-weight:700; margin:0;}
   .card-sub{font-size:13px; color:var(--muted); margin-top:2px;}
   .badge{
+    display:inline-block; box-sizing:border-box; text-align:center;
     font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; white-space:nowrap;
+    width:var(--badge-width, auto);
   }
   .badge.c0{background:var(--c0); color:var(--c0-text);}
   .badge.c1{background:var(--c1); color:var(--c1-text);}
@@ -488,28 +490,68 @@
     setTimeout(function(){ t.classList.remove("show"); }, 2200);
   }
 
-  // ---- category badge color (hash-assigned, stable per category name) ----
-  // Manual overrides checked first (e.g. vegetables always shown in green,
-  // regardless of what the hash would have picked); everything else falls
-  // back to the automatic hash-based assignment below.
+  // ---- category badge color ----
+  // Recomputed from scratch on every render (cheap — a handful of categories)
+  // rather than hashed, so two different categories currently in the
+  // inventory never collide on the same color as long as there are 8 or
+  // fewer distinct categories total. Manual overrides (e.g. vegetables
+  // always green) are pinned first and removed from the round-robin pool so
+  // they can't collide with whatever else lands on that slot either.
+  var ALL_BADGE_SLOTS = ["c0","c1","c2","c3","c4","c5","c6","c7"];
   var CATEGORY_COLOR_OVERRIDES = [
     { test: /ירק/, cls: "c5" } // ירקות / ירקות קפואים / etc. -> green
   ];
-  var categoryColorCache = {};
+  var categoryColorMap = {};
+  function recomputeCategoryColorMap(){
+    var cats = Array.from(new Set(items.map(function(it){ return (it.category || "אחר").toString(); }))).sort(function(a,b){ return a.localeCompare(b,"he"); });
+    var map = {};
+    var usedSlots = {};
+    // pass 1: pin overrides
+    cats.forEach(function(cat){
+      for (var o = 0; o < CATEGORY_COLOR_OVERRIDES.length; o++){
+        if (CATEGORY_COLOR_OVERRIDES[o].test.test(cat)){
+          map[cat] = CATEGORY_COLOR_OVERRIDES[o].cls;
+          usedSlots[CATEGORY_COLOR_OVERRIDES[o].cls] = true;
+          break;
+        }
+      }
+    });
+    // pass 2: assign the rest round-robin over the remaining slots, in a
+    // stable (alphabetical) order so the mapping doesn't jitter on re-render
+    var freeSlots = ALL_BADGE_SLOTS.filter(function(s){ return !usedSlots[s]; });
+    var next = 0;
+    cats.forEach(function(cat){
+      if (map[cat]) return;
+      if (!freeSlots.length){ map[cat] = "c0"; return; } // degenerate: no free slots at all
+      map[cat] = freeSlots[next % freeSlots.length];
+      next++;
+    });
+    categoryColorMap = map;
+  }
   function categoryBadgeClass(category){
     var key = (category || "אחר").toString();
-    if (categoryColorCache[key]) return categoryColorCache[key];
-    for (var o = 0; o < CATEGORY_COLOR_OVERRIDES.length; o++){
-      if (CATEGORY_COLOR_OVERRIDES[o].test.test(key)){
-        categoryColorCache[key] = CATEGORY_COLOR_OVERRIDES[o].cls;
-        return categoryColorCache[key];
-      }
-    }
-    var hash = 0;
-    for (var i = 0; i < key.length; i++){ hash = (hash * 31 + key.charCodeAt(i)) >>> 0; }
-    var cls = "c" + (hash % 8);
-    categoryColorCache[key] = cls;
-    return cls;
+    return categoryColorMap[key] || "c0";
+  }
+
+  // ---- constant badge width, sized to the longest category name currently
+  // in the inventory (not just what happens to be visible/filtered) ----
+  function equalizeBadgeWidth(){
+    var cats = Array.from(new Set(items.map(function(it){ return (it.category || "אחר").toString(); })));
+    if (!cats.length){ document.documentElement.style.removeProperty("--badge-width"); return; }
+    var probe = document.createElement("span");
+    probe.className = "badge";
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.width = "auto";
+    probe.style.whiteSpace = "nowrap";
+    document.body.appendChild(probe);
+    var max = 0;
+    cats.forEach(function(c){
+      probe.textContent = c;
+      max = Math.max(max, probe.offsetWidth);
+    });
+    document.body.removeChild(probe);
+    document.documentElement.style.setProperty("--badge-width", max + "px");
   }
 
   function num(v){
@@ -629,8 +671,7 @@
       return '<div class="card">' +
         ribbon +
         '<div class="card-top">' +
-          '<div><p class="card-title">'+esc(it.name||"ללא שם")+'</p>' +
-          '<div class="card-sub">'+esc(it.category||"ללא קטגוריה")+(it.location? " · "+esc(it.location):"")+'</div></div>' +
+          '<p class="card-title">'+esc(it.name||"ללא שם")+'</p>' +
           '<span class="badge '+badgeCls+'">'+esc(it.category||"אחר")+'</span>' +
         '</div>' +
         '<div class="card-meta">' +
@@ -743,6 +784,8 @@
   }
 
   function renderAll(){
+    recomputeCategoryColorMap();
+    equalizeBadgeWidth();
     renderChips();
     renderSummary();
     renderList();
